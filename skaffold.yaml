@@ -1,0 +1,16 @@
+apiVersion: skaffold/v2alpha4
+kind: Config
+metadata:
+  name: graphservice
+build:
+  artifacts:
+  - image: docker.pkg.github.com/vinhut/graph-service
+deploy:
+  helm:
+    releases:
+    - name: graph-service
+      chartPath: ../kube-deploy/charts/graph-service
+      valuesFiles:
+        - ../kube-deploy/charts/graph-service/values.yaml
+      values:
+        imageName: docker.pkg.github.com/vinhut/graph-service

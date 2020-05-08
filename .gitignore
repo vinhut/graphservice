@@ -1,0 +1,9 @@
+*.ini
+main
+*.DS_Store
+vendor/*
+*.exe
+DONT_COMMIT*
+run.bat
+graphservice
+kube-deploy
