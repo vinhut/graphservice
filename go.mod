@@ -1,4 +1,4 @@
-module gitlab.com/vin_hut/graphservice
+module github.com/vinhut/graphservice
 
 go 1.13
 
