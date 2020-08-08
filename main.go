@@ -3,6 +3,10 @@ package main
 import (
 	"github.com/gin-gonic/gin"
 	bolt "github.com/johnnadratowski/golang-neo4j-bolt-driver"
+	opentracing "github.com/opentracing/opentracing-go"
+	jaegercfg "github.com/uber/jaeger-client-go/config"
+	jaegerlog "github.com/uber/jaeger-client-go/log"
+	"github.com/uber/jaeger-lib/metrics"
 	"github.com/vinhut/graphservice/services"
 
 	"encoding/json"
@@ -37,11 +41,30 @@ func checkUser(authservice services.AuthService, token string) (*UserAuthData, e
 
 }
 
-func setupRouter(authservice services.AuthService) *gin.Engine {
+func setupRouter(authservice services.AuthService, driver bolt.Driver) *gin.Engine {
+
+	var JAEGER_COLLECTOR_ENDPOINT = os.Getenv("JAEGER_COLLECTOR_ENDPOINT")
+	cfg := jaegercfg.Configuration{
+		ServiceName: "graph-service",
+		Sampler: &jaegercfg.SamplerConfig{
+			Type:  "const",
+			Param: 1,
+		},
+		Reporter: &jaegercfg.ReporterConfig{
+			LogSpans:          true,
+			CollectorEndpoint: JAEGER_COLLECTOR_ENDPOINT,
+		},
+	}
+	jLogger := jaegerlog.StdLogger
+	jMetricsFactory := metrics.NullFactory
+	tracer, _, _ := cfg.NewTracer(
+		jaegercfg.Logger(jLogger),
+		jaegercfg.Metrics(jMetricsFactory),
+	)
+	opentracing.SetGlobalTracer(tracer)
 
 	router := gin.Default()
 
-	driver := bolt.NewDriver()
 	conn, _ := driver.OpenNeo(os.Getenv("NEO4J_SERVICE_URL"))
 
 	router.GET(SERVICE_NAME+"/ping", func(c *gin.Context) {
@@ -49,6 +72,8 @@ func setupRouter(authservice services.AuthService) *gin.Engine {
 	})
 
 	router.GET(SERVICE_NAME+"/follow", func(c *gin.Context) {
+
+		span := tracer.StartSpan("get follow status")
 
 		value, err := c.Cookie("token")
 		if err != nil {
@@ -74,13 +99,17 @@ func setupRouter(authservice services.AuthService) *gin.Engine {
 		fmt.Println("result : ", result)
 		if len(result) > 0 {
 			c.String(200, "ok")
+			span.Finish()
 		} else {
 			c.String(200, "nok")
+			span.Finish()
 		}
 
 	})
 
 	router.POST(SERVICE_NAME+"/follow", func(c *gin.Context) {
+
+		span := tracer.StartSpan("follow user")
 
 		value, err := c.Cookie("token")
 		if err != nil {
@@ -109,10 +138,13 @@ func setupRouter(authservice services.AuthService) *gin.Engine {
 		}
 
 		c.String(200, "OK")
+		span.Finish()
 
 	})
 
 	router.POST(SERVICE_NAME+"/unfollow", func(c *gin.Context) {
+
+		span := tracer.StartSpan("unfollow user")
 
 		value, err := c.Cookie("token")
 		if err != nil {
@@ -139,10 +171,13 @@ func setupRouter(authservice services.AuthService) *gin.Engine {
 		}
 
 		c.String(200, "OK")
+		span.Finish()
 
 	})
 
 	router.GET(SERVICE_NAME+"/following", func(c *gin.Context) {
+
+		span := tracer.StartSpan("get following")
 
 		value, err := c.Cookie("token")
 		if err != nil {
@@ -167,6 +202,7 @@ func setupRouter(authservice services.AuthService) *gin.Engine {
 
 		if len(result) == 0 {
 			c.String(200, "[]")
+			span.Finish()
 		}
 
 		fmt.Println("result = ", result)
@@ -178,10 +214,13 @@ func setupRouter(authservice services.AuthService) *gin.Engine {
 
 		result_json, _ := json.Marshal(uid_list)
 		c.String(200, string(result_json))
+		span.Finish()
 
 	})
 
 	router.GET(SERVICE_NAME+"/followers", func(c *gin.Context) {
+
+		span := tracer.StartSpan("get followers")
 
 		value, err := c.Cookie("token")
 		if err != nil {
@@ -206,6 +245,7 @@ func setupRouter(authservice services.AuthService) *gin.Engine {
 
 		if len(result) == 0 {
 			c.String(200, "[]")
+			span.Finish()
 		} else {
 
 			fmt.Println("result = ", len(result))
@@ -217,10 +257,13 @@ func setupRouter(authservice services.AuthService) *gin.Engine {
 
 			result_json, _ := json.Marshal(uid_list)
 			c.String(200, string(result_json))
+			span.Finish()
 		}
 	})
 
 	router.GET(SERVICE_NAME+"/followers_count", func(c *gin.Context) {
+
+		span := tracer.StartSpan("get followers count")
 
 		value, err := c.Cookie("token")
 		if err != nil {
@@ -245,9 +288,12 @@ func setupRouter(authservice services.AuthService) *gin.Engine {
 
 		fmt.Println("result = ", result)
 		c.String(200, strconv.FormatInt((result[0][0].(int64)), 10))
+		span.Finish()
 	})
 
 	router.GET(SERVICE_NAME+"/following_count", func(c *gin.Context) {
+
+		span := tracer.StartSpan("get following count")
 
 		value, err := c.Cookie("token")
 		if err != nil {
@@ -272,6 +318,7 @@ func setupRouter(authservice services.AuthService) *gin.Engine {
 
 		fmt.Println("result = ", result)
 		c.String(200, strconv.FormatInt((result[0][0].(int64)), 10))
+		span.Finish()
 	})
 
 	return router
@@ -280,7 +327,8 @@ func setupRouter(authservice services.AuthService) *gin.Engine {
 func main() {
 
 	authservice := services.NewUserAuthService()
-	router := setupRouter(authservice)
+	driver := bolt.NewDriver()
+	router := setupRouter(authservice, driver)
 	router.Run(":8080")
 
 }
