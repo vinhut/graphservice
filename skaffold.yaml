@@ -9,8 +9,8 @@ deploy:
   helm:
     releases:
     - name: graph-service
-      chartPath: ../kube-deploy/charts/graph-service
+      chartPath: ../../kube-deploy/charts/graph-service
       valuesFiles:
-        - ../kube-deploy/charts/graph-service/values.yaml
+        - ../../kube-deploy/charts/graph-service/values.yaml
       values:
         imageName: docker.pkg.github.com/vinhut/graph-service

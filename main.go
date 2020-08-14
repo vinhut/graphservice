@@ -7,6 +7,7 @@ import (
 	jaegercfg "github.com/uber/jaeger-client-go/config"
 	jaegerlog "github.com/uber/jaeger-client-go/log"
 	"github.com/uber/jaeger-lib/metrics"
+	"github.com/vinhut/graphservice/models"
 	"github.com/vinhut/graphservice/services"
 
 	"encoding/json"
@@ -18,10 +19,11 @@ import (
 var SERVICE_NAME = "graph-service"
 
 type UserAuthData struct {
-	Uid     string
-	Email   string
-	Role    string
-	Created string
+	Uid      string
+	Username string
+	Email    string
+	Role     string
+	Created  string
 }
 
 func checkUser(authservice services.AuthService, token string) (*UserAuthData, error) {
@@ -41,7 +43,7 @@ func checkUser(authservice services.AuthService, token string) (*UserAuthData, e
 
 }
 
-func setupRouter(authservice services.AuthService, driver bolt.Driver) *gin.Engine {
+func setupRouter(authservice services.AuthService, relationdb models.RelationDatabase) *gin.Engine {
 
 	var JAEGER_COLLECTOR_ENDPOINT = os.Getenv("JAEGER_COLLECTOR_ENDPOINT")
 	cfg := jaegercfg.Configuration{
@@ -65,8 +67,6 @@ func setupRouter(authservice services.AuthService, driver bolt.Driver) *gin.Engi
 
 	router := gin.Default()
 
-	conn, _ := driver.OpenNeo(os.Getenv("NEO4J_SERVICE_URL"))
-
 	router.GET(SERVICE_NAME+"/ping", func(c *gin.Context) {
 		c.String(200, "pong")
 	})
@@ -85,15 +85,9 @@ func setupRouter(authservice services.AuthService, driver bolt.Driver) *gin.Engi
 		}
 
 		follow_uid, _ := c.GetQuery("uid")
-
-		query_is_following := "match (n:Person { uid: {id} })-[:FOLLOW]->(p:Person {uid: {followuid}}) return 'ok'"
-		data := map[string]interface{}{
-			"followuid": follow_uid,
-			"id":        user_data.Uid,
-		}
-		result, _, _, result_err := conn.QueryNeoAll(query_is_following, data)
-		if result_err != nil {
-			panic(result_err)
+		result, find_err := relationdb.Find("uid", user_data.Uid, follow_uid)
+		if find_err != nil {
+			panic(find_err)
 		}
 
 		fmt.Println("result : ", result)
@@ -122,17 +116,8 @@ func setupRouter(authservice services.AuthService, driver bolt.Driver) *gin.Engi
 
 		follow_uid, _ := c.GetQuery("uid")
 
-		query_follow := `
-                MERGE (p:Person { uid: {followuid} })
-		MERGE (n:Person { uid: {id}, name: {name} })
-                MERGE (n)-[:FOLLOW]->(p)
-		`
-		data := map[string]interface{}{
-			"followuid": follow_uid,
-			"id":        user_data.Uid,
-			"name":      user_data.Email,
-		}
-		_, result_err := conn.ExecNeo(query_follow, data)
+		result_err := relationdb.Connect(user_data.Uid, user_data.Username, follow_uid)
+
 		if result_err != nil {
 			panic(result_err)
 		}
@@ -142,7 +127,7 @@ func setupRouter(authservice services.AuthService, driver bolt.Driver) *gin.Engi
 
 	})
 
-	router.POST(SERVICE_NAME+"/unfollow", func(c *gin.Context) {
+	router.DELETE(SERVICE_NAME+"/follow", func(c *gin.Context) {
 
 		span := tracer.StartSpan("unfollow user")
 
@@ -157,15 +142,8 @@ func setupRouter(authservice services.AuthService, driver bolt.Driver) *gin.Engi
 
 		follow_uid, _ := c.GetQuery("uid")
 
-		query_unfollow := `
-                MATCH (n:Person { uid: {id} })-[r:FOLLOW]->(p:Person {uid: {followuid}})
-		DELETE r
-		`
-		data := map[string]interface{}{
-			"followuid": follow_uid,
-			"id":        user_data.Uid,
-		}
-		_, result_err := conn.ExecNeo(query_unfollow, data)
+		result_err := relationdb.Disconnect(user_data.Uid, follow_uid)
+
 		if result_err != nil {
 			panic(result_err)
 		}
@@ -179,23 +157,17 @@ func setupRouter(authservice services.AuthService, driver bolt.Driver) *gin.Engi
 
 		span := tracer.StartSpan("get following")
 
+		uid, _ := c.GetQuery("uid")
 		value, err := c.Cookie("token")
 		if err != nil {
 			panic("failed get token")
 		}
-		user_data, check_err := checkUser(authservice, value)
+		_, check_err := checkUser(authservice, value)
 		if check_err != nil {
 			panic("error check user")
 		}
 
-		query_following := `
-                MATCH (n:Person { uid: {id} })-->(p)
-		RETURN p.uid
-		`
-		data := map[string]interface{}{
-			"id": user_data.Uid,
-		}
-		result, _, _, result_err := conn.QueryNeoAll(query_following, data)
+		result, result_err := relationdb.Following(uid)
 		if result_err != nil {
 			panic(result_err)
 		}
@@ -203,18 +175,19 @@ func setupRouter(authservice services.AuthService, driver bolt.Driver) *gin.Engi
 		if len(result) == 0 {
 			c.String(200, "[]")
 			span.Finish()
-		}
+		} else {
 
-		fmt.Println("result = ", result)
-		uid_list := make([]string, len(result))
-		for idx, row := range result {
-			fmt.Println("row = ", row)
-			uid_list[idx] = row[0].(string)
-		}
+			fmt.Println("result = ", result)
+			uid_list := make([]string, len(result))
+			for idx, row := range result {
+				fmt.Println("row = ", row)
+				uid_list[idx] = row[0].(string)
+			}
 
-		result_json, _ := json.Marshal(uid_list)
-		c.String(200, string(result_json))
-		span.Finish()
+			result_json, _ := json.Marshal(uid_list)
+			c.String(200, string(result_json))
+			span.Finish()
+		}
 
 	})
 
@@ -226,19 +199,13 @@ func setupRouter(authservice services.AuthService, driver bolt.Driver) *gin.Engi
 		if err != nil {
 			panic("failed get token")
 		}
-		user_data, check_err := checkUser(authservice, value)
+		_, check_err := checkUser(authservice, value)
 		if check_err != nil {
 			panic("error check user")
 		}
 
-		query_followers := `
-                MATCH (n:Person { uid: {id} })<--(p)
-		RETURN p.uid
-		`
-		data := map[string]interface{}{
-			"id": user_data.Uid,
-		}
-		result, _, _, result_err := conn.QueryNeoAll(query_followers, data)
+		uid, _ := c.GetQuery("uid")
+		result, result_err := relationdb.Followers(uid)
 		if result_err != nil {
 			panic(result_err)
 		}
@@ -269,25 +236,18 @@ func setupRouter(authservice services.AuthService, driver bolt.Driver) *gin.Engi
 		if err != nil {
 			panic("failed get token")
 		}
-		user_data, check_err := checkUser(authservice, value)
+		_, check_err := checkUser(authservice, value)
 		if check_err != nil {
 			panic("error check user")
 		}
 
-		query_followers_count := `
-                MATCH (n:Person { uid: {id} })<--(p)
-		RETURN count(p.uid) as count
-		`
-		data := map[string]interface{}{
-			"id": user_data.Uid,
-		}
-		result, _, _, result_err := conn.QueryNeoAll(query_followers_count, data)
+		uid, _ := c.GetQuery("uid")
+		result, result_err := relationdb.Followers(uid)
 		if result_err != nil {
 			panic(result_err)
 		}
 
-		fmt.Println("result = ", result)
-		c.String(200, strconv.FormatInt((result[0][0].(int64)), 10))
+		c.String(200, strconv.Itoa(len(result)))
 		span.Finish()
 	})
 
@@ -299,25 +259,18 @@ func setupRouter(authservice services.AuthService, driver bolt.Driver) *gin.Engi
 		if err != nil {
 			panic("failed get token")
 		}
-		user_data, check_err := checkUser(authservice, value)
+		_, check_err := checkUser(authservice, value)
 		if check_err != nil {
 			panic("error check user")
 		}
 
-		query_following_count := `
-                MATCH (n:Person { uid: {id} })-->(p)
-		RETURN count(p.uid) as count
-		`
-		data := map[string]interface{}{
-			"id": user_data.Uid,
-		}
-		result, _, _, result_err := conn.QueryNeoAll(query_following_count, data)
+		uid, _ := c.GetQuery("uid")
+		result, result_err := relationdb.Following(uid)
 		if result_err != nil {
 			panic(result_err)
 		}
 
-		fmt.Println("result = ", result)
-		c.String(200, strconv.FormatInt((result[0][0].(int64)), 10))
+		c.String(200, strconv.Itoa(len(result)))
 		span.Finish()
 	})
 
@@ -328,7 +281,8 @@ func main() {
 
 	authservice := services.NewUserAuthService()
 	driver := bolt.NewDriver()
-	router := setupRouter(authservice, driver)
+	relationdb := models.NewRelationDatabase(driver)
+	router := setupRouter(authservice, relationdb)
 	router.Run(":8080")
 
 }
