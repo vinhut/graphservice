@@ -26,10 +26,11 @@ func NewRelationDatabase(driver bolt.Driver) RelationDatabase {
 }
 
 func (relationdb *relationDatabase) Find(key, value, value2 string) ([][]interface{}, error) {
-	query_is_following := "match (n:Person { {key}: {value} })-[:FOLLOW]->(p:Person {{key}: {value2}}) return 'ok'"
+	query_is_following := "match (n:Person { uid: {value1} })-[:FOLLOW]->(p:Person { uid: {value2} }) return 'ok'"
 	data := map[string]interface{}{
-		"key":    key,
-		"value":  value,
+		"key1":   key,
+		"key2":   key,
+		"value1": value,
 		"value2": value2,
 	}
 	result, _, _, result_err := relationdb.conn.QueryNeoAll(query_is_following, data)
@@ -60,7 +61,7 @@ func (relationdb *relationDatabase) Connect(uid, username, follow_uid string) er
 func (relationdb *relationDatabase) Disconnect(uid, follow_uid string) error {
 
 	query_unfollow := `
-        MATCH (n:Person { uid: {uid} })-[r:FOLLOW]->(p:Person {uid: {follow_uid}})
+        MATCH (n:Person { uid: {uid} })-[r:FOLLOW]->(p:Person {uid: {follow_uid} })
         DELETE r
         `
 	data := map[string]interface{}{
