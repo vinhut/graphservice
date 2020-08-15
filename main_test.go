@@ -19,8 +19,10 @@ func TestPing(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	mock_auth := mocks.NewMockAuthService(ctrl)
+	mock_relation := mocks.NewMockRelationDatabase(ctrl)
+	mock_kafka := mocks.NewMockKafkaService(ctrl)
 
-	router := setupRouter(mock_auth)
+	router := setupRouter(mock_auth, mock_relation, mock_kafka)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", SERVICE_NAME+"/ping", nil)

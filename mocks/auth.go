@@ -2,7 +2,7 @@
 // Source: services/auth.go
 
 // Package mock_services is a generated GoMock package.
-package mock_services
+package mocks
 
 import (
 	gomock "github.com/golang/mock/gomock"
