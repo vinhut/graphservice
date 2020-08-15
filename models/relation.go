@@ -19,7 +19,10 @@ type relationDatabase struct {
 }
 
 func NewRelationDatabase(driver bolt.Driver) RelationDatabase {
-	conn, _ := driver.OpenNeo(os.Getenv("NEO4J_SERVICE_URL"))
+	conn, driver_err := driver.OpenNeo(os.Getenv("NEO4J_SERVICE_URL"))
+	if driver_err != nil {
+		panic(driver_err)
+	}
 	return &relationDatabase{
 		conn: conn,
 	}

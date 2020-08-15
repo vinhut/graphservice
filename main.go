@@ -43,7 +43,7 @@ func checkUser(authservice services.AuthService, token string) (*UserAuthData, e
 
 }
 
-func setupRouter(authservice services.AuthService, relationdb models.RelationDatabase) *gin.Engine {
+func setupRouter(authservice services.AuthService, relationdb models.RelationDatabase, kafkaservice services.KafkaService) *gin.Engine {
 
 	var JAEGER_COLLECTOR_ENDPOINT = os.Getenv("JAEGER_COLLECTOR_ENDPOINT")
 	cfg := jaegercfg.Configuration{
@@ -122,6 +122,10 @@ func setupRouter(authservice services.AuthService, relationdb models.RelationDat
 			panic(result_err)
 		}
 
+		kafka_err := kafkaservice.Send("follow", user_data.Uid+","+follow_uid+",1")
+		if kafka_err != nil {
+			panic(kafka_err)
+		}
 		c.String(200, "OK")
 		span.Finish()
 
@@ -280,9 +284,10 @@ func setupRouter(authservice services.AuthService, relationdb models.RelationDat
 func main() {
 
 	authservice := services.NewUserAuthService()
+	kafka_service := services.NewKafkaWriterService()
 	driver := bolt.NewDriver()
 	relationdb := models.NewRelationDatabase(driver)
-	router := setupRouter(authservice, relationdb)
+	router := setupRouter(authservice, relationdb, kafka_service)
 	router.Run(":8080")
 
 }
