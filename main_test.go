@@ -25,7 +25,7 @@ func TestPing(t *testing.T) {
 	router := setupRouter(mock_auth, mock_relation, mock_kafka)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", SERVICE_NAME+"/ping", nil)
+	req, _ := http.NewRequest("GET", "/ping", nil)
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, 200, w.Code)
