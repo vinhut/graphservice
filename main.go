@@ -278,6 +278,26 @@ func setupRouter(authservice services.AuthService, relationdb models.RelationDat
 		span.Finish()
 	})
 
+	// internal
+	router.POST("/internal/follow", func(c *gin.Context) {
+
+		span := tracer.StartSpan("internal follow user")
+
+		my_uid, _ := c.GetQuery("my_uid")
+		my_username, _ := c.GetQuery("my_username")
+		follow_uid, _ := c.GetQuery("follow_uid")
+
+		result_err := relationdb.Connect(my_uid, my_username, follow_uid)
+
+		if result_err != nil {
+			panic(result_err)
+		}
+
+		c.String(200, "OK")
+		span.Finish()
+
+	})
+
 	return router
 }
 
